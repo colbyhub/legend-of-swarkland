@@ -513,22 +513,19 @@ pub fn projectRays(transparency_matrix: Matrix(bool), point_of_view_x: u16, poin
             const y = point_of_view_y - row;
 
             const slope_to_center = Rational{
-                .n = row,
-                .d = col,
+                .n = col,
+                .d = row,
             };
-            reachability_matrix.atUnchecked(x, y).* = blk: {
-                for (shadows.toSliceConst()) |shadow, i| {
-                    if (slope_to_center.lessThan(shadow.a)) break;
-                    if (slope_to_center.lessThan(shadow.b)) {
-                        // haven't reached the shadows yet
-                        continue;
-                    }
+            for (shadows.toSliceConst()) |shadow, i| {
+                if (shadow.a.lessThan(slope_to_center) and slope_to_center.lessThan(shadow.b)) {
                     // blocked by the shadow
-                    break :blk false;
+                    reachability_matrix.atUnchecked(x, y).* = false;
+                    break;
                 }
+            } else {
                 // in the clear
-                break :blk true;
-            };
+                reachability_matrix.atUnchecked(x, y).* = true;
+            }
 
             const is_transparent: bool = transparency_matrix.getUnchecked(x, y);
 
@@ -536,17 +533,16 @@ pub fn projectRays(transparency_matrix: Matrix(bool), point_of_view_x: u16, poin
                 const shadow = RationalSegment{
                     .a = Rational{
                         // top left
-                        .n = row - 1,
-                        .d = col,
+                        .n = col,
+                        .d = row,
                     },
                     .b = Rational{
                         // bottom right
-                        .n = row,
-                        .d = col + 1,
+                        .n = col + 1,
+                        .d = row - 1,
                     },
                 };
                 try shadows.append(shadow);
-                asdf();
             }
         }
     }

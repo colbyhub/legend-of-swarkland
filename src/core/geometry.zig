@@ -179,9 +179,22 @@ pub fn bezier2(
     return x0.scaled(max_s - s).plus(x1.scaled(s)).scaledDivTrunc(max_s);
 }
 
+/// denominator must not be negative.
+/// don't make the values too big, or we'll get overflow.
 pub const Rational = struct {
     n: i32,
     d: i32,
+
+    pub fn lessThan(a: Rational, b: Rational) bool {
+        return a.n * b.d < b.n * a.d;
+    }
+    pub fn lessThanOrEqual(a: Rational, b: Rational) bool {
+        return !b.lessThan(a);
+    }
+
+    pub fn equals(a: Rational, b: Rational) bool {
+        return a.n * b.d == b.n * a.d;
+    }
 };
 
 pub const RationalSegment = struct {

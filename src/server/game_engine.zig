@@ -211,10 +211,14 @@ pub const GameEngine = struct {
             .individual_to_perception = IdMap([]PerceivedFrame).init(self.allocator),
             .state_changes = blk: {
                 var ret = ArrayList(StateDiff).init(self.allocator);
-                var terrain = try Terrain.initFill(self.allocator, 4, 4, TerrainSpace{
+                var terrain = try Terrain.initFill(self.allocator, 4, 6, TerrainSpace{
                     .floor = .dirt,
                     .wall = .air,
                 });
+                terrain.atUnchecked(1, 1).* = TerrainSpace{
+                    .floor = .dirt,
+                    .wall = .dirt,
+                };
                 try ret.append(StateDiff{
                     .terrain_init = terrain,
                 });
@@ -224,7 +228,7 @@ pub const GameEngine = struct {
                 try ret.append(StateDiff{
                     .spawn = Individual{
                         .id = findAvailableId(&new_id_cursor, empty_individuals),
-                        .abs_position = makeCoord(0, 3),
+                        .abs_position = makeCoord(0, 5),
                         .species = .human,
                     },
                 });
