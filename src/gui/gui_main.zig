@@ -545,6 +545,7 @@ pub fn projectRays(transparency_matrix: Matrix(bool), point_of_view_x: u16, poin
                         .d = col + 1,
                     },
                 };
+                try shadows.append(shadow);
                 asdf();
             }
         }
