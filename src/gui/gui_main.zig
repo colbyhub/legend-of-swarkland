@@ -345,6 +345,20 @@ fn doMainLoop(renderer: *sdl.Renderer, screen_buffer: *sdl.Texture) !void {
                 const display_position = renderThing(renderer, progress, move_frame_time, camera_offset, frame.self);
                 if (show_poised_attack and state.started_attack) {
                     textures.renderSprite(renderer, textures.sprites.dagger, display_position);
+                } else {
+                    const xs = [_]sdl.c.Sint16{
+                        @intCast(i16, display_position.x + 0),
+                        @intCast(i16, display_position.x + 32),
+                        @intCast(i16, display_position.x + 0),
+                        @intCast(i16, display_position.x + 0),
+                    };
+                    const ys = [_]sdl.c.Sint16{
+                        @intCast(i16, display_position.y + 0),
+                        @intCast(i16, display_position.y + 0),
+                        @intCast(i16, display_position.y + 32),
+                        @intCast(i16, display_position.y + 0),
+                    };
+                    sdl.assertZero(sdl.c.filledPolygonColor(renderer, xs[0..].ptr, ys[0..].ptr, xs.len, 0xbbbbbbbb));
                 }
             },
         }
