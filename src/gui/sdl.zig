@@ -4,6 +4,7 @@ const sdl = @This();
 // this is technically all we need
 pub const c = @cImport({
     @cInclude("SDL2/SDL.h");
+    @cInclude("SDL2/SDL2_gfxPrimitives.h");
 });
 // but for convenience, we'll publish some special case wrappers/aliases
 // to isolate the quirks of using a C api from zig.
