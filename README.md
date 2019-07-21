@@ -12,7 +12,7 @@ Here's how to build from source on Linux:
 
 1. Get a very recent build of [zig](https://ziglang.org/).
    I'm developing off of zig's master branch, so check my commit log for "updated to zig xxxxxx" commits to know which version to use.
-2. `sudo apt-get install libsdl2-dev`
+2. `sudo apt-get install libsdl2-dev libsdl2-gfx-dev`
 3. `git submodule update --init`
 4. `zig build`
 5. `./zig-cache/bin/legend-of-swarkland`

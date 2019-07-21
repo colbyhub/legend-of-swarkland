@@ -178,3 +178,13 @@ pub fn bezier2(
 ) Coord {
     return x0.scaled(max_s - s).plus(x1.scaled(s)).scaledDivTrunc(max_s);
 }
+
+pub const Rational = struct {
+    n: i32,
+    d: i32,
+};
+
+pub const RationalSegment = struct {
+    a: Rational,
+    b: Rational,
+};

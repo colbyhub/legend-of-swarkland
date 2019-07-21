@@ -31,7 +31,8 @@ pub fn server_main(main_player_queues: *SomeQueues) !void {
     const main_player_id: u32 = 1;
     var you_are_alive = true;
     {
-        const happenings = try game_engine.getStartGameHappenings();
+        //const happenings = try game_engine.getStartGameHappenings();
+        const happenings = try game_engine.getStartDebugHappenings();
         try game_state.applyStateChanges(happenings.state_changes);
     }
     // Welcome to swarkland!

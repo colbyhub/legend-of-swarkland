@@ -206,6 +206,33 @@ pub const GameEngine = struct {
         }
     }
 
+    pub fn getStartDebugHappenings(self: *const GameEngine) !Happenings {
+        return Happenings{
+            .individual_to_perception = IdMap([]PerceivedFrame).init(self.allocator),
+            .state_changes = blk: {
+                var ret = ArrayList(StateDiff).init(self.allocator);
+                var terrain = try Terrain.initFill(self.allocator, 4, 4, TerrainSpace{
+                    .floor = .dirt,
+                    .wall = .air,
+                });
+                try ret.append(StateDiff{
+                    .terrain_init = terrain,
+                });
+
+                var new_id_cursor: u32 = 1;
+                const empty_individuals = IdMap(*Individual).init(std.debug.failing_allocator);
+                try ret.append(StateDiff{
+                    .spawn = Individual{
+                        .id = findAvailableId(&new_id_cursor, empty_individuals),
+                        .abs_position = makeCoord(0, 3),
+                        .species = .human,
+                    },
+                });
+                break :blk ret.toOwnedSlice();
+            },
+        };
+    }
+
     pub fn getStartGameHappenings(self: *const GameEngine) !Happenings {
         return Happenings{
             .individual_to_perception = IdMap([]PerceivedFrame).init(self.allocator),

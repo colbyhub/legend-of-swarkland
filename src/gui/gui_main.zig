@@ -307,6 +307,8 @@ fn doMainLoop(renderer: *sdl.Renderer, screen_buffer: *sdl.Texture) !void {
                 const center_screen = makeCoord(7, 7).scaled(32).plus(makeCoord(32 / 2, 32 / 2));
                 const camera_offset = center_screen.minus(getRelDisplayPosition(progress, move_frame_time, frame.self));
 
+                const terrain_visibility = try computeVisibility(frame.terrain, makeCoord(0, 0));
+
                 // render terrain
                 {
                     const terrain_offset = frame.terrain.rel_position.scaled(32).plus(camera_offset);
@@ -315,6 +317,9 @@ fn doMainLoop(renderer: *sdl.Renderer, screen_buffer: *sdl.Texture) !void {
                     while (cursor.y <= i32(terrain.height)) : (cursor.y += 1) {
                         cursor.x = 0;
                         while (cursor.x <= i32(terrain.width)) : (cursor.x += 1) {
+                            if (terrain_visibility.getCoord(cursor)) |is_transparent| {
+                                if (!is_transparent) continue;
+                            } else continue; // TODO: why does this happen?
                             if (terrain.getCoord(cursor)) |cell| {
                                 const display_position = cursor.scaled(32).plus(terrain_offset);
                                 const floor_texture = switch (cell.floor) {
@@ -470,4 +475,80 @@ fn loadAnimations(frames: []PerceivedFrame, now: i32) !Animations {
         .start_time = now,
         .frames = try core.protocol.deepClone(allocator, frames),
     };
+}
+
+const Matrix = core.matrix.Matrix;
+pub fn computeVisibility(terrain: core.protocol.TerrainChunk, point_of_view: Coord) !Matrix(bool) {
+    var transparency_matrix = try Matrix(bool).initFill(allocator, terrain.matrix.width, terrain.matrix.height, true);
+    var cursor = makeCoord(0, 0);
+    while (cursor.y < i32(terrain.matrix.height)) : (cursor.y += 1) {
+        cursor.x = 0;
+        while (cursor.x < i32(terrain.matrix.width)) : (cursor.x += 1) {
+            const is_transparent = core.game_logic.isOpenSpace(terrain.matrix.getCoord(cursor).?.wall);
+            transparency_matrix.atUnchecked(@intCast(u16, cursor.x), @intCast(u16, cursor.y)).* = is_transparent;
+        }
+    }
+
+    const matrix_pov = point_of_view.minus(terrain.rel_position);
+    return projectRays(transparency_matrix, @intCast(u16, matrix_pov.x), @intCast(u16, matrix_pov.y), core.game_logic.view_distance);
+}
+
+const Rational = core.geometry.Rational;
+const RationalSegment = core.geometry.RationalSegment;
+
+/// transparency_matrix must contain everything within distance (inclusive) of point_of_view.
+/// returns a matrix with the same size and position as transparency_matrix.
+pub fn projectRays(transparency_matrix: Matrix(bool), point_of_view_x: u16, point_of_view_y: u16, distance: u16) !Matrix(bool) {
+    // http://journal.stuffwithstuff.com/2015/09/07/what-the-hero-sees/
+    var reachability_matrix = try Matrix(bool).initFill(allocator, transparency_matrix.width, transparency_matrix.height, false);
+
+    var shadows = ArrayList(RationalSegment).init(allocator);
+
+    shadows.shrink(0);
+    var row: u16 = 1;
+    while (row <= distance) : (row += 1) {
+        var col: u16 = 0;
+        while (col <= row) : (col += 1) {
+            const x = point_of_view_x + col;
+            const y = point_of_view_y - row;
+
+            const slope_to_center = Rational{
+                .n = row,
+                .d = col,
+            };
+            reachability_matrix.atUnchecked(x, y).* = blk: {
+                for (shadows.toSliceConst()) |shadow, i| {
+                    if (slope_to_center.lessThan(shadow.a)) break;
+                    if (slope_to_center.lessThan(shadow.b)) {
+                        // haven't reached the shadows yet
+                        continue;
+                    }
+                    // blocked by the shadow
+                    break :blk false;
+                }
+                // in the clear
+                break :blk true;
+            };
+
+            const is_transparent: bool = transparency_matrix.getUnchecked(x, y);
+
+            if (!is_transparent) {
+                const shadow = RationalSegment{
+                    .a = Rational{
+                        // top left
+                        .n = row - 1,
+                        .d = col,
+                    },
+                    .b = Rational{
+                        // bottom right
+                        .n = row,
+                        .d = col + 1,
+                    },
+                };
+                asdf();
+            }
+        }
+    }
+
+    return reachability_matrix;
 }

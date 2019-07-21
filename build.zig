@@ -72,6 +72,7 @@ fn make_binary_variant(
             });
         } else {
             exe.linkSystemLibrary("SDL2");
+            exe.linkSystemLibrary("SDL2_gfx");
         }
         exe.linkSystemLibrary("c");
     } else {
