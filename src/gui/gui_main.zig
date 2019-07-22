@@ -313,14 +313,13 @@ fn doMainLoop(renderer: *sdl.Renderer, screen_buffer: *sdl.Texture) !void {
                 {
                     const terrain_offset = frame.terrain.rel_position.scaled(32).plus(camera_offset);
                     const terrain = frame.terrain.matrix;
-                    var cursor = makeCoord(undefined, 0);
-                    while (cursor.y <= i32(terrain.height)) : (cursor.y += 1) {
-                        cursor.x = 0;
-                        while (cursor.x <= i32(terrain.width)) : (cursor.x += 1) {
-                            if (terrain_visibility.getCoord(cursor)) |is_transparent| {
-                                if (!is_transparent) continue;
-                            } else continue; // TODO: why does this happen?
-                            if (terrain.getCoord(cursor)) |cell| {
+                    {
+                        var cursor = makeCoord(undefined, 0);
+                        while (cursor.y < i32(terrain.height)) : (cursor.y += 1) {
+                            cursor.x = 0;
+                            while (cursor.x < i32(terrain.width)) : (cursor.x += 1) {
+                                const is_visible = terrain_visibility.reachable_corners.getCoord(cursor).?;
+                                const cell = terrain.getCoord(cursor).?;
                                 const display_position = cursor.scaled(32).plus(terrain_offset);
                                 const floor_texture = switch (cell.floor) {
                                     Floor.unknown => textures.sprites.unknown_floor,
@@ -331,15 +330,30 @@ fn doMainLoop(renderer: *sdl.Renderer, screen_buffer: *sdl.Texture) !void {
                                     Floor.stairs_down => textures.sprites.stairs_down,
                                 };
                                 textures.renderSprite(renderer, floor_texture, display_position);
-                                const wall_texture = switch (cell.wall) {
-                                    Wall.unknown => textures.sprites.unknown_wall,
-                                    Wall.air => continue,
-                                    Wall.dirt => selectAesthetic(textures.sprites.brown_brick[0..], aesthetic_seed, cursor),
-                                    Wall.stone => selectAesthetic(textures.sprites.gray_brick[0..], aesthetic_seed, cursor),
-                                };
-                                textures.renderSprite(renderer, wall_texture, display_position);
+                                render_wall: {
+                                    const wall_texture = switch (cell.wall) {
+                                        Wall.unknown => textures.sprites.unknown_wall,
+                                        Wall.air => break :render_wall,
+                                        Wall.dirt => selectAesthetic(textures.sprites.brown_brick[0..], aesthetic_seed, cursor),
+                                        Wall.stone => selectAesthetic(textures.sprites.gray_brick[0..], aesthetic_seed, cursor),
+                                    };
+                                    textures.renderSprite(renderer, wall_texture, display_position);
+                                }
                             }
                         }
+                    }
+                    for (terrain_visibility.shadows.toSliceConst()) |shadow| {
+                        const xs = [_]sdl.c.Sint16{
+                            @intCast(i16, camera_offset.x + shadow.a.n * 32),
+                            @intCast(i16, camera_offset.x + shadow.b.n * 32),
+                            @intCast(i16, camera_offset.x + shadow.b.n * 32),
+                        };
+                        const ys = [_]sdl.c.Sint16{
+                            @intCast(i16, camera_offset.y - shadow.a.d * 32),
+                            @intCast(i16, camera_offset.y - shadow.b.d * 32),
+                            @intCast(i16, camera_offset.y - shadow.a.d * 32),
+                        };
+                        sdl.assertZero(sdl.c.filledPolygonColor(renderer, xs[0..].ptr, ys[0..].ptr, xs.len, 0x88000000));
                     }
                 }
 
@@ -478,9 +492,9 @@ fn loadAnimations(frames: []PerceivedFrame, now: i32) !Animations {
 }
 
 const Matrix = core.matrix.Matrix;
-pub fn computeVisibility(terrain: core.protocol.TerrainChunk, point_of_view: Coord) !Matrix(bool) {
+pub fn computeVisibility(terrain: core.protocol.TerrainChunk, point_of_view: Coord) !ProjectedRays {
     var transparency_matrix = try Matrix(bool).initFill(allocator, terrain.matrix.width, terrain.matrix.height, true);
-    var cursor = makeCoord(0, 0);
+    var cursor = makeCoord(undefined, 0);
     while (cursor.y < i32(terrain.matrix.height)) : (cursor.y += 1) {
         cursor.x = 0;
         while (cursor.x < i32(terrain.matrix.width)) : (cursor.x += 1) {
@@ -496,15 +510,21 @@ pub fn computeVisibility(terrain: core.protocol.TerrainChunk, point_of_view: Coo
 const Rational = core.geometry.Rational;
 const RationalSegment = core.geometry.RationalSegment;
 
+pub const ProjectedRays = struct {
+    reachable_corners: Matrix(bool),
+    reachable_centers: Matrix(bool),
+    shadows: ArrayList(RationalSegment),
+};
+
 /// transparency_matrix must contain everything within distance (inclusive) of point_of_view.
 /// returns a matrix with the same size and position as transparency_matrix.
-pub fn projectRays(transparency_matrix: Matrix(bool), point_of_view_x: u16, point_of_view_y: u16, distance: u16) !Matrix(bool) {
+pub fn projectRays(transparency_matrix: Matrix(bool), point_of_view_x: u16, point_of_view_y: u16, distance: u16) !ProjectedRays {
     // http://journal.stuffwithstuff.com/2015/09/07/what-the-hero-sees/
-    var reachability_matrix = try Matrix(bool).initFill(allocator, transparency_matrix.width, transparency_matrix.height, false);
+    var reachable_corners = try Matrix(bool).initFill(allocator, transparency_matrix.width, transparency_matrix.height, false);
+    var reachable_centers = try Matrix(bool).initFill(allocator, transparency_matrix.width, transparency_matrix.height, false);
 
     var shadows = ArrayList(RationalSegment).init(allocator);
 
-    shadows.shrink(0);
     var row: u16 = 1;
     while (row <= distance) : (row += 1) {
         var col: u16 = 0;
@@ -512,40 +532,40 @@ pub fn projectRays(transparency_matrix: Matrix(bool), point_of_view_x: u16, poin
             const x = point_of_view_x + col;
             const y = point_of_view_y - row;
 
-            const slope_to_center = Rational{
+            const top_left = Rational{
                 .n = col,
                 .d = row,
             };
+            const bottom_right = Rational{
+                .n = col + 1,
+                .d = row - 1,
+            };
             for (shadows.toSliceConst()) |shadow, i| {
-                if (shadow.a.lessThan(slope_to_center) and slope_to_center.lessThan(shadow.b)) {
+                if (shadow.a.lessThan(top_left) and top_left.lessThan(shadow.b)) {
                     // blocked by the shadow
-                    reachability_matrix.atUnchecked(x, y).* = false;
+                    reachable_corners.atUnchecked(x, y).* = false;
                     break;
                 }
             } else {
                 // in the clear
-                reachability_matrix.atUnchecked(x, y).* = true;
+                reachable_corners.atUnchecked(x, y).* = true;
             }
 
             const is_transparent: bool = transparency_matrix.getUnchecked(x, y);
 
             if (!is_transparent) {
                 const shadow = RationalSegment{
-                    .a = Rational{
-                        // top left
-                        .n = col,
-                        .d = row,
-                    },
-                    .b = Rational{
-                        // bottom right
-                        .n = col + 1,
-                        .d = row - 1,
-                    },
+                    .a = top_left,
+                    .b = bottom_right,
                 };
                 try shadows.append(shadow);
             }
         }
     }
 
-    return reachability_matrix;
+    return ProjectedRays{
+        .reachable_corners = reachable_corners,
+        .reachable_centers = reachable_centers,
+        .shadows = shadows,
+    };
 }
