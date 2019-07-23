@@ -519,7 +519,7 @@ pub const ProjectedRays = struct {
 /// transparency_matrix must contain everything within distance (inclusive) of point_of_view.
 /// returns a matrix with the same size and position as transparency_matrix.
 pub fn projectRays(transparency_matrix: Matrix(bool), point_of_view_x: u16, point_of_view_y: u16, distance: u16) !ProjectedRays {
-    // http://journal.stuffwithstuff.com/2015/09/07/what-the-hero-sees/
+    // inspired by http://journal.stuffwithstuff.com/2015/09/07/what-the-hero-sees/
     var reachable_corners = try Matrix(bool).initFill(allocator, transparency_matrix.width, transparency_matrix.height, false);
     var reachable_centers = try Matrix(bool).initFill(allocator, transparency_matrix.width, transparency_matrix.height, false);
 
@@ -540,16 +540,20 @@ pub fn projectRays(transparency_matrix: Matrix(bool), point_of_view_x: u16, poin
                 .n = col + 1,
                 .d = row - 1,
             };
-            for (shadows.toSliceConst()) |shadow, i| {
-                if (shadow.a.lessThan(top_left) and top_left.lessThan(shadow.b)) {
-                    // blocked by the shadow
-                    reachable_corners.atUnchecked(x, y).* = false;
-                    break;
+            var reachable = true;
+            {
+                var i: usize = 0;
+                var shadow_start: usize = 0;
+                while (i < shadows.len) : (i += 1) {
+                    var shadow_left = shadows.at(shadow_start).a;
+                    if (shadow.a.lessThan(top_left) and top_left.lessThan(shadow.b)) {
+                        // blocked by the shadow
+                        reachable_corners.atUnchecked(x, y).* = false;
+                        break;
+                    }
                 }
-            } else {
-                // in the clear
-                reachable_corners.atUnchecked(x, y).* = true;
             }
+            reachable_corners.atUnchecked(x, y).* = reachable;
 
             const is_transparent: bool = transparency_matrix.getUnchecked(x, y);
 
