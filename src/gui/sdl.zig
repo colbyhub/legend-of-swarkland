@@ -46,7 +46,8 @@ pub fn makeRect(rect: geometry.Rect) sdl.c.SDL_Rect {
 
 pub fn assertZero(ret: c_int) void {
     if (ret == 0) return;
-    std.debug.panic("sdl function returned an error: {c}", sdl.c.SDL_GetError());
+    // FIXME: [*c]const u8 should support {s} formatting.
+    std.debug.panic("sdl function returned an error: {s}", ([*]const u8)(sdl.c.SDL_GetError()));
 }
 
 pub const Renderer = sdl.c.SDL_Renderer;

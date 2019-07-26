@@ -185,6 +185,19 @@ pub const Rational = struct {
     n: i32,
     d: i32,
 
+    pub fn int(n: i32) Rational {
+        return Rational{
+            .n = n,
+            .d = 1,
+        };
+    }
+    pub fn intAndAHalf(n: i32) Rational {
+        return Rational{
+            .n = n * 2 + 1,
+            .d = 2,
+        };
+    }
+
     pub fn lessThan(a: Rational, b: Rational) bool {
         return a.n * b.d < b.n * a.d;
     }
@@ -197,7 +210,7 @@ pub const Rational = struct {
     }
 };
 
-pub const RationalSegment = struct {
-    a: Rational,
-    b: Rational,
+pub const RationalCoord = struct {
+    x: Rational,
+    y: Rational,
 };

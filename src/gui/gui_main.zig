@@ -307,7 +307,8 @@ fn doMainLoop(renderer: *sdl.Renderer, screen_buffer: *sdl.Texture) !void {
                 const center_screen = makeCoord(7, 7).scaled(32).plus(makeCoord(32 / 2, 32 / 2));
                 const camera_offset = center_screen.minus(getRelDisplayPosition(progress, move_frame_time, frame.self));
 
-                const terrain_visibility = try computeVisibility(frame.terrain, makeCoord(0, 0));
+                var shadow_polygon = ArrayList(RationalCoord).init(allocator);
+                try computeVisibility(frame.terrain, makeCoord(0, 0), &shadow_polygon);
 
                 // render terrain
                 {
@@ -318,7 +319,6 @@ fn doMainLoop(renderer: *sdl.Renderer, screen_buffer: *sdl.Texture) !void {
                         while (cursor.y < i32(terrain.height)) : (cursor.y += 1) {
                             cursor.x = 0;
                             while (cursor.x < i32(terrain.width)) : (cursor.x += 1) {
-                                const is_visible = terrain_visibility.reachable_corners.getCoord(cursor).?;
                                 const cell = terrain.getCoord(cursor).?;
                                 const display_position = cursor.scaled(32).plus(terrain_offset);
                                 const floor_texture = switch (cell.floor) {
@@ -342,19 +342,16 @@ fn doMainLoop(renderer: *sdl.Renderer, screen_buffer: *sdl.Texture) !void {
                             }
                         }
                     }
-                    for (terrain_visibility.shadows.toSliceConst()) |shadow| {
-                        const xs = [_]sdl.c.Sint16{
-                            @intCast(i16, camera_offset.x + shadow.a.n * 32),
-                            @intCast(i16, camera_offset.x + shadow.b.n * 32),
-                            @intCast(i16, camera_offset.x + shadow.b.n * 32),
-                        };
-                        const ys = [_]sdl.c.Sint16{
-                            @intCast(i16, camera_offset.y - shadow.a.d * 32),
-                            @intCast(i16, camera_offset.y - shadow.b.d * 32),
-                            @intCast(i16, camera_offset.y - shadow.a.d * 32),
-                        };
-                        sdl.assertZero(sdl.c.filledPolygonColor(renderer, xs[0..].ptr, ys[0..].ptr, xs.len, 0x88000000));
-                    }
+
+                    if (shadow_polygon.len > 0) {
+                        var xs = try allocator.alloc(i16, shadow_polygon.len);
+                        var ys = try allocator.alloc(i16, shadow_polygon.len);
+                        for (shadow_polygon.toSliceConst()) |rational_coord, i| {
+                            xs[i] = @intCast(i16, terrain_offset.x + @divTrunc(32 * rational_coord.x.n, rational_coord.x.d));
+                            ys[i] = @intCast(i16, terrain_offset.y + @divTrunc(32 * rational_coord.y.n, rational_coord.y.d));
+                        }
+                        sdl.assertZero(sdl.c.filledPolygonColor(renderer, xs[0..].ptr, ys[0..].ptr, @intCast(c_int, xs.len), 0x88000000));
+                    } else @panic("TODO: remove this panic");
                 }
 
                 // render the things
@@ -492,7 +489,11 @@ fn loadAnimations(frames: []PerceivedFrame, now: i32) !Animations {
 }
 
 const Matrix = core.matrix.Matrix;
-pub fn computeVisibility(terrain: core.protocol.TerrainChunk, point_of_view: Coord) !ProjectedRays {
+pub fn computeVisibility(
+    terrain: core.protocol.TerrainChunk,
+    point_of_view: Coord,
+    shadow_polygon: *ArrayList(RationalCoord),
+) !void {
     var transparency_matrix = try Matrix(bool).initFill(allocator, terrain.matrix.width, terrain.matrix.height, true);
     var cursor = makeCoord(undefined, 0);
     while (cursor.y < i32(terrain.matrix.height)) : (cursor.y += 1) {
@@ -504,72 +505,81 @@ pub fn computeVisibility(terrain: core.protocol.TerrainChunk, point_of_view: Coo
     }
 
     const matrix_pov = point_of_view.minus(terrain.rel_position);
-    return projectRays(transparency_matrix, @intCast(u16, matrix_pov.x), @intCast(u16, matrix_pov.y), core.game_logic.view_distance);
+    return projectRays(
+        transparency_matrix,
+        matrix_pov,
+        core.game_logic.view_distance,
+        shadow_polygon,
+    );
 }
 
 const Rational = core.geometry.Rational;
-const RationalSegment = core.geometry.RationalSegment;
-
-pub const ProjectedRays = struct {
-    reachable_corners: Matrix(bool),
-    reachable_centers: Matrix(bool),
-    shadows: ArrayList(RationalSegment),
+const RationalCoord = core.geometry.RationalCoord;
+const RationalSegment = struct {
+    a: Rational,
+    b: Rational,
 };
 
 /// transparency_matrix must contain everything within distance (inclusive) of point_of_view.
 /// returns a matrix with the same size and position as transparency_matrix.
-pub fn projectRays(transparency_matrix: Matrix(bool), point_of_view_x: u16, point_of_view_y: u16, distance: u16) !ProjectedRays {
-    // inspired by http://journal.stuffwithstuff.com/2015/09/07/what-the-hero-sees/
-    var reachable_corners = try Matrix(bool).initFill(allocator, transparency_matrix.width, transparency_matrix.height, false);
-    var reachable_centers = try Matrix(bool).initFill(allocator, transparency_matrix.width, transparency_matrix.height, false);
-
+/// inspired by http://journal.stuffwithstuff.com/2015/09/07/what-the-hero-sees/
+pub fn projectRays(
+    transparency_matrix: Matrix(bool),
+    /// actual point of view is from the center of the square
+    point_of_view: Coord,
+    distance: u16,
+    shadow_polygon: *ArrayList(RationalCoord),
+) !void {
     var shadows = ArrayList(RationalSegment).init(allocator);
 
-    var row: u16 = 1;
-    while (row <= distance) : (row += 1) {
-        var col: u16 = 0;
+    var starting_col: i32 = 0;
+    var row: i32 = 1;
+    while (row <= i32(distance)) : (row += 1) {
+        var col: i32 = starting_col;
         while (col <= row) : (col += 1) {
-            const x = point_of_view_x + col;
-            const y = point_of_view_y - row;
+            const rel_coord = makeCoord(col, -row);
+            const tile_coord = point_of_view.plus(rel_coord);
+            const is_transparent: bool = transparency_matrix.getCoord(tile_coord).?;
 
-            const top_left = Rational{
-                .n = col,
-                .d = row,
-            };
-            const bottom_right = Rational{
-                .n = col + 1,
-                .d = row - 1,
-            };
-            var reachable = true;
-            {
-                var i: usize = 0;
-                var shadow_start: usize = 0;
-                while (i < shadows.len) : (i += 1) {
-                    var shadow_left = shadows.at(shadow_start).a;
-                    if (shadow.a.lessThan(top_left) and top_left.lessThan(shadow.b)) {
-                        // blocked by the shadow
-                        reachable_corners.atUnchecked(x, y).* = false;
-                        break;
-                    }
+            if (col == 0) {
+                if (!is_transparent) {
+                    // this is the leftmost shadow
+                    try shadows.insert(0, RationalSegment{
+                        // straight up to bottom center
+                        .a = Rational.int(0),
+                        // lower right corner
+                        .b = Rational{
+                            .n = 1,
+                            .d = rel_coord.y * 2 - 1,
+                        },
+                    });
+                    try shadow_polygon.insertSlice(0, [_]RationalCoord{
+                        // bottom center
+                        RationalCoord{
+                            .x = Rational.intAndAHalf(tile_coord.x),
+                            .y = Rational.int(tile_coord.y + 1),
+                        },
+                        // bottom right
+                        RationalCoord{
+                            .x = Rational.int(tile_coord.x + 1),
+                            .y = Rational.int(tile_coord.y + 1),
+                        },
+                    });
+
+                    // don't need to check the leftmost column any more
+                    starting_col = 1;
                 }
-            }
-            reachable_corners.atUnchecked(x, y).* = reachable;
-
-            const is_transparent: bool = transparency_matrix.getUnchecked(x, y);
-
-            if (!is_transparent) {
-                const shadow = RationalSegment{
-                    .a = top_left,
-                    .b = bottom_right,
-                };
-                try shadows.append(shadow);
+            } else {
+                // do nothing
             }
         }
     }
 
-    return ProjectedRays{
-        .reachable_corners = reachable_corners,
-        .reachable_centers = reachable_centers,
-        .shadows = shadows,
-    };
+    if (shadow_polygon.len > 0) {
+        // start at the point of view
+        try shadow_polygon.insert(0, RationalCoord{
+            .x = Rational.intAndAHalf(point_of_view.x),
+            .y = Rational.intAndAHalf(point_of_view.y),
+        });
+    }
 }
