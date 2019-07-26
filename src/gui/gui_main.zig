@@ -542,9 +542,10 @@ pub fn projectRays(
             const is_transparent: bool = transparency_matrix.getCoord(tile_coord).?;
 
             if (col == 0) {
+                // straight up
                 if (!is_transparent) {
                     // this is the leftmost shadow
-                    try shadows.insert(0, RationalSegment{
+                    const shadow = RationalSegment{
                         // straight up to bottom center
                         .a = Rational.int(0),
                         // lower right corner
@@ -552,8 +553,9 @@ pub fn projectRays(
                             .n = 1,
                             .d = rel_coord.y * 2 - 1,
                         },
-                    });
-                    try shadow_polygon.insertSlice(0, [_]RationalCoord{
+                    };
+                    try shadows.append(shadow);
+                    try shadow_polygon.appendSlice([_]RationalCoord{
                         // bottom center
                         RationalCoord{
                             .x = Rational.intAndAHalf(tile_coord.x),
@@ -570,16 +572,96 @@ pub fn projectRays(
                     starting_col = 1;
                 }
             } else {
-                // do nothing
+                // some slope
+                if (!is_transparent) {
+                    const upper_left_coord = RationalCoord{
+                        .x = Rational.int(tile_coord.x),
+                        .y = Rational.int(tile_coord.y),
+                    };
+                    const upper_left_slope = Rational{
+                        .n = 2 * rel_coord.x - 1,
+                        .d = 2 * rel_coord.y - 1,
+                    };
+
+                    const lower_left_coord = RationalCoord{
+                        .x = Rational.int(tile_coord.x),
+                        .y = Rational.int(tile_coord.y + 1),
+                    };
+                    const lower_left_slope = Rational{
+                        .n = 2 * rel_coord.x - 1,
+                        .d = 2 * rel_coord.y + 1,
+                    };
+
+                    const lower_right_coord = RationalCoord{
+                        .x = Rational.int(tile_coord.x + 1),
+                        .y = Rational.int(tile_coord.y + 1),
+                    };
+                    const lower_right_slope = Rational{
+                        .n = 2 * rel_coord.x + 1,
+                        .d = 2 * rel_coord.y + 1,
+                    };
+
+                    try doAThing(upper_left_slope, upper_left_coord, lower_left_slope, lower_left_coord, &shadows, shadow_polygon);
+                    try doAThing(lower_left_slope, lower_left_coord, lower_right_slope, lower_right_coord, &shadows, shadow_polygon);
+                }
             }
         }
     }
 
     if (shadow_polygon.len > 0) {
-        // start at the point of view
+        // when rendering a single wedge, add a point for the polygon at the point of view
         try shadow_polygon.insert(0, RationalCoord{
             .x = Rational.intAndAHalf(point_of_view.x),
             .y = Rational.intAndAHalf(point_of_view.y),
         });
     }
+}
+
+fn doAThing(
+    left_slope: Rational,
+    left_coord: RationalCoord,
+    right_slope: Rational,
+    right_coord: RationalCoord,
+    shadows: *ArrayList(RationalSegment),
+    shadow_polygon: *ArrayList(RationalCoord),
+) !void {
+    var final_left_slope = left_slope;
+    var final_right_slope = right_slope;
+
+    for (shadows.toSliceConst()) |shadow| {
+        if (shadow.b.lessThanOrEqual(left_slope)) continue;
+        if (right_slope.lessThanOrEqual(shadow.a)) continue;
+
+        // partially or fully covering us
+        const covers_left = shadow.a.lessThanOrEqual(left_slope);
+        const covers_right = right_slope.lessThanOrEqual(shadow.b);
+        if (covers_left) {
+            if (covers_right) {
+                // fully covered. nothing to do
+                return;
+            }
+            std.debug.assert(final_left_slope.equals(left_slope));
+            final_left_slope = left_slope;
+        } else {
+            std.debug.assert(covers_right);
+            std.debug.assert(final_right_slope.equals(right_slope));
+            final_right_slope = right_slope;
+        }
+    }
+
+    // we now have the clamped bounds on our shadow
+    if (!final_left_slope.lessThan(final_right_slope)) {
+        // zero size shadow
+        return;
+    }
+    try shadows.append(RationalSegment{
+        .a = final_left_slope,
+        .b = final_right_slope,
+    });
+
+    // TODO: scoot the shadows in as appropriate
+    try shadow_polygon.appendSlice([_]RationalCoord{
+        left_coord,
+        right_coord,
+    });
 }
