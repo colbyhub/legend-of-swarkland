@@ -509,7 +509,7 @@ pub fn computeVisibility(
     return projectRays(
         transparency_matrix,
         matrix_pov,
-        3, // core.game_logic.view_distance,
+        core.game_logic.view_distance,
         shadow_polygon,
     );
 }
@@ -633,11 +633,11 @@ fn doAThing(
                 return;
             }
             std.debug.assert(final_left_slope.equals(left_slope));
-            final_left_slope = left_slope;
+            final_left_slope = shadow.b;
         } else {
             std.debug.assert(covers_right);
             std.debug.assert(final_right_slope.equals(right_slope));
-            final_right_slope = right_slope;
+            final_right_slope = shadow.a;
         }
     }
 
