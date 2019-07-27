@@ -309,6 +309,7 @@ fn doMainLoop(renderer: *sdl.Renderer, screen_buffer: *sdl.Texture) !void {
 
                 var shadow_polygon = ArrayList(RationalCoord).init(allocator);
                 try computeVisibility(frame.terrain, makeCoord(0, 0), &shadow_polygon);
+                //core.debug.testing.deepPrint("shadow polygon: ", shadow_polygon.toSliceConst());
 
                 // render terrain
                 {
@@ -508,7 +509,7 @@ pub fn computeVisibility(
     return projectRays(
         transparency_matrix,
         matrix_pov,
-        core.game_logic.view_distance,
+        3, // core.game_logic.view_distance,
         shadow_polygon,
     );
 }
@@ -532,78 +533,69 @@ pub fn projectRays(
 ) !void {
     var shadows = ArrayList(RationalSegment).init(allocator);
 
-    var starting_col: i32 = 0;
-    var row: i32 = 1;
-    while (row <= i32(distance)) : (row += 1) {
-        var col: i32 = starting_col;
-        while (col <= row) : (col += 1) {
-            const rel_coord = makeCoord(col, -row);
+    var dx: i32 = 1;
+    while (dx <= i32(distance)) : (dx += 1) {
+        var dy: i32 = 0;
+        while (dy <= dx) : (dy += 1) {
+            const rel_coord = makeCoord(dx, dy);
             const tile_coord = point_of_view.plus(rel_coord);
             const is_transparent: bool = transparency_matrix.getCoord(tile_coord).?;
 
-            if (col == 0) {
-                // straight up
-                if (!is_transparent) {
-                    // this is the leftmost shadow
-                    const shadow = RationalSegment{
-                        // straight up to bottom center
-                        .a = Rational.int(0),
-                        // lower right corner
-                        .b = Rational{
-                            .n = 1,
-                            .d = rel_coord.y * 2 - 1,
-                        },
-                    };
-                    try shadows.append(shadow);
-                    try shadow_polygon.appendSlice([_]RationalCoord{
-                        // bottom center
-                        RationalCoord{
-                            .x = Rational.intAndAHalf(tile_coord.x),
-                            .y = Rational.int(tile_coord.y + 1),
-                        },
-                        // bottom right
-                        RationalCoord{
-                            .x = Rational.int(tile_coord.x + 1),
-                            .y = Rational.int(tile_coord.y + 1),
-                        },
-                    });
+            // some slope
+            if (!is_transparent) {
+                // 👁 _________________v slope sweeping direction
+                //
+                //    mid corner    early corner
+                //              \  /
+                //               ┌┐
+                //               └┘
+                //              /
+                //             late corner
+                const early_coord = RationalCoord{
+                    .x = Rational.int(tile_coord.x + 1),
+                    .y = Rational.int(tile_coord.y),
+                };
+                const early_slope = Rational{
+                    .d = 2 * rel_coord.x + 1,
+                    .n = 2 * rel_coord.y - 1,
+                };
 
-                    // don't need to check the leftmost column any more
-                    starting_col = 1;
-                }
-            } else {
-                // some slope
-                if (!is_transparent) {
-                    const upper_left_coord = RationalCoord{
+                // Special case for the mid corner directly at the start of the sweep.
+                // It starts in the middle of the edge instead of the corner.
+                const mid_coord = if (dy == 0)
+                    RationalCoord{
+                        .x = Rational.int(tile_coord.x),
+                        .y = Rational.intAndAHalf(tile_coord.y),
+                    }
+                else
+                    RationalCoord{
                         .x = Rational.int(tile_coord.x),
                         .y = Rational.int(tile_coord.y),
                     };
-                    const upper_left_slope = Rational{
-                        .n = 2 * rel_coord.x - 1,
-                        .d = 2 * rel_coord.y - 1,
+                const mid_slope = if (dy == 0)
+                    Rational{
+                        .d = 2 * rel_coord.x - 1,
+                        .n = 2 * rel_coord.y,
+                    }
+                else
+                    Rational{
+                        .d = 2 * rel_coord.x - 1,
+                        .n = 2 * rel_coord.y - 1,
                     };
 
-                    const lower_left_coord = RationalCoord{
-                        .x = Rational.int(tile_coord.x),
-                        .y = Rational.int(tile_coord.y + 1),
-                    };
-                    const lower_left_slope = Rational{
-                        .n = 2 * rel_coord.x - 1,
-                        .d = 2 * rel_coord.y + 1,
-                    };
+                const late_coord = RationalCoord{
+                    .x = Rational.int(tile_coord.x),
+                    .y = Rational.int(tile_coord.y + 1),
+                };
+                const late_slope = Rational{
+                    .d = 2 * rel_coord.x - 1,
+                    .n = 2 * rel_coord.y + 1,
+                };
 
-                    const lower_right_coord = RationalCoord{
-                        .x = Rational.int(tile_coord.x + 1),
-                        .y = Rational.int(tile_coord.y + 1),
-                    };
-                    const lower_right_slope = Rational{
-                        .n = 2 * rel_coord.x + 1,
-                        .d = 2 * rel_coord.y + 1,
-                    };
-
-                    try doAThing(upper_left_slope, upper_left_coord, lower_left_slope, lower_left_coord, &shadows, shadow_polygon);
-                    try doAThing(lower_left_slope, lower_left_coord, lower_right_slope, lower_right_coord, &shadows, shadow_polygon);
+                if (dy != 0) {
+                    try doAThing(early_slope, early_coord, mid_slope, mid_coord, &shadows, shadow_polygon);
                 }
+                try doAThing(mid_slope, mid_coord, late_slope, late_coord, &shadows, shadow_polygon);
             }
         }
     }
