@@ -223,7 +223,7 @@ pub const GameEngine = struct {
                 try ret.append(StateDiff{
                     .spawn = Individual{
                         .id = findAvailableId(&new_id_cursor, empty_individuals),
-                        .abs_position = makeCoord(2, 2),
+                        .abs_position = makeCoord(2, 5),
                         .species = .human,
                     },
                 });

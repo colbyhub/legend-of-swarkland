@@ -307,7 +307,7 @@ fn doMainLoop(renderer: *sdl.Renderer, screen_buffer: *sdl.Texture) !void {
                 const center_screen = makeCoord(7, 7).scaled(32).plus(makeCoord(32 / 2, 32 / 2));
                 const camera_offset = center_screen.minus(getRelDisplayPosition(progress, move_frame_time, frame.self));
 
-                var shadow_polygon = ArrayList(RationalCoord).init(allocator);
+                var shadow_polygon = ArrayList(PolygonSegment).init(allocator);
                 try computeVisibility(frame.terrain, makeCoord(0, 0), &shadow_polygon);
                 //core.debug.testing.deepPrint("shadow polygon: ", shadow_polygon.toSliceConst());
 
@@ -493,7 +493,7 @@ const Matrix = core.matrix.Matrix;
 pub fn computeVisibility(
     terrain: core.protocol.TerrainChunk,
     point_of_view: Coord,
-    shadow_polygon: *ArrayList(RationalCoord),
+    shadow_polygon: *ArrayList(PolygonSegment),
 ) !void {
     var transparency_matrix = try Matrix(bool).initFill(allocator, terrain.matrix.width, terrain.matrix.height, true);
     var cursor = makeCoord(undefined, 0);
@@ -520,6 +520,11 @@ const RationalSegment = struct {
     a: Rational,
     b: Rational,
 };
+const PolygonSegment = struct {
+    slope: Rational,
+    a: RationalCoord,
+    b: RationalCoord,
+};
 
 /// transparency_matrix must contain everything within distance (inclusive) of point_of_view.
 /// returns a matrix with the same size and position as transparency_matrix.
@@ -529,7 +534,7 @@ pub fn projectRays(
     /// actual point of view is from the center of the square
     point_of_view: Coord,
     distance: u16,
-    shadow_polygon: *ArrayList(RationalCoord),
+    shadow_polygon: *ArrayList(PolygonSegment),
 ) !void {
     var shadows = ArrayList(RationalSegment).init(allocator);
 
@@ -615,7 +620,7 @@ fn doAThing(
     right_slope: Rational,
     right_coord: RationalCoord,
     shadows: *ArrayList(RationalSegment),
-    shadow_polygon: *ArrayList(RationalCoord),
+    shadow_polygon: *ArrayList(PolygonSegment),
 ) !void {
     var final_left_slope = left_slope;
     var final_right_slope = right_slope;
